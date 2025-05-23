@@ -63,7 +63,15 @@ if uploaded_file:
     df_pelne["różnica"] = df_pelne["zeskanowano"] - df_pelne["stan"]
 
     st.subheader("📊 Porównanie stanów")
-    st.dataframe(df_pelne)
+    def highlight_diff(row):
+    if row['różnica'] < 0:
+        return ['background-color: #f8d7da'] * len(row)  # jasnoczerwony
+    elif row['różnica'] > 0:
+        return ['background-color: #cce5ff'] * len(row)  # jasnoniebieski
+    else:
+        return [''] * len(row)
+
+st.dataframe(df_pelne.style.apply(highlight_diff, axis=1))
 
     # === Eksport do Excela ===
     excel_buffer = io.BytesIO()
