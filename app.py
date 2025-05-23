@@ -8,7 +8,7 @@ def highlight_diff(val):
     if val < 0:
         color = 'red'
     elif val > 0:
-        color = 'blue'
+        color = 'yellow'
     else:
         color = ''
     return f'color: {color}'
@@ -42,31 +42,29 @@ if uploaded_file:
     if "zeskanowane" not in st.session_state:
         st.session_state.zeskanowane = {}
 
-    if "input_reset_token" not in st.session_state:
-        st.session_state.input_reset_token = str(uuid.uuid4())
+    if "input_model" not in st.session_state:
+        st.session_state.input_model = ""
 
-    st.success("Plik załadowany poprawnie!")
+    # Funkcja wywoływana po wpisaniu modelu i naciśnięciu Enter
+    def scan_model():
+        model = st.session_state.input_model.strip()
+        if model:
+            st.session_state.zeskanowane[model] = st.session_state.zeskanowane.get(model, 0) + 1
+            st.session_state.input_model = ""  # czyścimy pole input
 
-    # === Skaner kodów (automatyczny) ===
-    input_model = st.text_input(
+    # Pole tekstowe ze skanerem / wpisem modelu
+    st.text_input(
         "Zeskanuj kod modelu (lub wpisz ręcznie i naciśnij Enter)",
-        key="input_" + st.session_state.input_reset_token
+        key="input_model",
+        on_change=scan_model
     )
 
-    model = input_model.strip()
-    if model:
-        st.session_state.zeskanowane[model] = st.session_state.zeskanowane.get(model, 0) + 1
-
-        # Reset inputu przez zmianę klucza
-        st.session_state.input_reset_token = str(uuid.uuid4())
-        st.experimental_rerun()
-
-    # === Przycisk do wyczyszczenia sesji ===
+    # Przycisk do wyczyszczenia sesji
     if st.button("🗑️ Wyczyść wszystkie skany"):
         st.session_state.zeskanowane = {}
         st.experimental_rerun()
 
-    # === Porównanie z rzeczywistym stanem ===
+    # Porównanie z rzeczywistym stanem
     df_skan = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
     df_pelne = stany_magazynowe.merge(df_skan, on="model", how="outer").fillna(0)
     df_pelne["zeskanowano"] = df_pelne["zeskanowano"].astype(int)
@@ -75,7 +73,7 @@ if uploaded_file:
     st.subheader("📊 Porównanie stanów")
     st.dataframe(df_pelne.style.applymap(highlight_diff, subset=['różnica']))
 
-    # === Eksport do Excela ===
+    # Eksport do Excela
     excel_buffer = io.BytesIO()
     df_pelne.to_excel(excel_buffer, index=False, engine='openpyxl')
     excel_buffer.seek(0)
