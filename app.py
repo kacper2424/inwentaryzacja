@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import io
-from PIL import Image # pyzbar potrzebuje obrazu PIL
-import cv2 # Nadal potrzebne do operacji na klatkach (rysowanie)
+from PIL import Image
+import cv2
 import numpy as np
 import time
 import queue
 
-from pyzbar.pyzbar import decode as pyzbar_decode # Import pyzbar
+from pyzbar.pyzbar import decode as pyzbar_decode
 
 from streamlit_webrtc import VideoProcessorBase, webrtc_streamer, RTCConfiguration, WebRtcMode
 
@@ -40,57 +40,46 @@ class QRScannerProcessorPyzbar(VideoProcessorBase):
         self.last_scan_time = 0
         self.scan_cooldown_seconds = 2.0
         self.result_queue = result_queue
-        self._active = True # Procesor jest aktywny po utworzeniu
+        self._active = True
 
     def set_active(self, active: bool):
         self._active = active
 
     def recv(self, frame):
         if not self._active or self.result_queue is None:
-            return frame # Zwróć oryginalną klatkę, jeśli nieaktywny
+            return frame
 
         img_bgr = frame.to_ndarray(format="bgr24")
-        
-        # Konwersja do obrazu PIL dla pyzbar
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
-
         decoded_text_display = None
         try:
             decoded_objects = pyzbar_decode(pil_img)
             current_time = time.time()
-
             for obj in decoded_objects:
                 decoded_text = obj.data.decode("utf-8")
-                
                 if decoded_text:
                     if not (decoded_text == self.last_scanned_value and \
                             (current_time - self.last_scan_time) < self.scan_cooldown_seconds):
                         try:
                             self.result_queue.put_nowait(decoded_text)
                         except queue.Full:
-                            pass # Kolejka pełna, pomiń ten skan
-                        
+                            pass
                         self.last_scanned_value = decoded_text
                         self.last_scan_time = current_time
                         decoded_text_display = f"OK: {decoded_text[:20]}..." if len(decoded_text) > 20 else f"OK: {decoded_text}"
                     else:
                         decoded_text_display = f"Scanned: {decoded_text[:20]}..." if len(decoded_text) > 20 else f"Scanned: {decoded_text}"
-
-                    # Rysowanie prostokąta na oryginalnej klatce BGR
+                    
                     (x, y, w, h) = obj.rect
                     cv2.rectangle(img_bgr, (x, y), (x + w, y + h), (0, 255, 0), 2)
                     if decoded_text_display:
                         cv2.putText(img_bgr, decoded_text_display, (x, y - 10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-                    break # Zazwyczaj przetwarzamy pierwszy znaleziony kod QR
-            
+                    break 
             return frame.from_ndarray(img_bgr, format="bgr24")
         except Exception as e:
-            # W przypadku błędu w logice przetwarzania, logujemy i zwracamy oryginalną klatkę
-            # print(f"Error in QRScannerProcessorPyzbar.recv: {e}") # Do debugowania lokalnego
             return frame.from_ndarray(img_bgr, format="bgr24")
-
 
 # --- Główna aplikacja Streamlit ---
 st.set_page_config(page_title="📦 Inwentaryzacja Sprzętu (Live Scan)", layout="wide")
@@ -99,7 +88,6 @@ st.title("📦 Inwentaryzacja sprzętu (Skanowanie Live)")
 RTC_CONFIGURATION = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
 # --- Inicjalizacja stanu sesji ---
-# Musi być wykonane przed jakimkolwiek użyciem tych kluczy
 if "result_queue" not in st.session_state:
     st.session_state.result_queue = queue.Queue(maxsize=10)
 if "zeskanowane" not in st.session_state:
@@ -129,12 +117,9 @@ with st.sidebar:
 if uploaded_file:
     try:
         stany_magazynowe = load_data(uploaded_file)
-        # st.write("DEBUG: Plik Excel przetworzony.") # Odkomentuj do debugowania
     except Exception as e:
         st.error(f"Błąd wczytywania pliku: {e}")
         st.stop()
-
-    # st.write("DEBUG: Sekcja po wczytaniu pliku jest osiągana.") # Odkomentuj do debugowania
 
     st.subheader("➕ Dodaj model ręcznie")
     def process_manually_entered_model():
@@ -142,10 +127,17 @@ if uploaded_file:
         if model:
             count = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.zeskanowane[model] = count
-            st.session_state.input_model_manual = ""
+            st.session_state.input_model_manual = "" # Czyść pole po przetworzeniu
             st.session_state.last_scan_message = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
-            st.rerun()
-    st.text_input("Wpisz model ręcznie i naciśnij Enter:", key="input_model_manual", on_change=process_manually_entered_model, placeholder="Np. Laptop XYZ123")
+            # Nie ma potrzeby st.rerun() tutaj, on_change i zmiana session_state to zrobią
+    st.text_input(
+        "Wpisz model ręcznie i naciśnij Enter:", 
+        key="input_model_manual", 
+        on_change=process_manually_entered_model, 
+        placeholder="Np. Laptop XYZ123",
+        autofocus=not st.session_state.scanner_active # Ustaw autofocus tylko jeśli skaner nie jest aktywny
+                                                      # lub przy pierwszym ładowaniu tej sekcji
+    )
     st.markdown("---")
 
     st.subheader("📷 Skaner QR Live (z pyzbar)")
@@ -155,7 +147,7 @@ if uploaded_file:
         st.session_state.scanner_active = not st.session_state.scanner_active
         msg_text = "Skaner uruchomiony. Skieruj kamerę na kod QR." if st.session_state.scanner_active else "Skaner zatrzymany."
         st.session_state.last_scan_message = {"text": msg_text, "type": "info"}
-        st.rerun()
+        st.rerun() # Rerun jest OK po akcji przycisku
 
     message_placeholder_scan = st.empty()
     if st.session_state.last_scan_message["text"]:
@@ -169,15 +161,10 @@ if uploaded_file:
         st.info("Próba uruchomienia kamery... Upewnij się, że przeglądarka ma uprawnienia dostępu do kamery.", icon="📸")
 
         def app_video_processor_factory_local_pyzbar():
-            # Upewnij się, że result_queue istnieje w session_state
-            # To powinno być już zapewnione przez inicjalizację na górze skryptu
             if "result_queue" not in st.session_state:
-                # Ten fallback nie powinien być potrzebny, jeśli inicjalizacja jest poprawna
                 st.session_state.result_queue = queue.Queue(maxsize=10) 
-                # st.warning("DEBUG: result_queue został ponownie zainicjowany w fabryce.") # Do debugowania
-            
             processor = QRScannerProcessorPyzbar(result_queue=st.session_state.result_queue)
-            processor.set_active(True) # Procesor jest aktywny, gdy skaner jest włączony
+            processor.set_active(True) 
             return processor
         
         desired_play_state = st.session_state.scanner_active
@@ -192,12 +179,10 @@ if uploaded_file:
             desired_playing_state=desired_play_state
         )
 
-        if webrtc_ctx: # Sprawdź, czy kontekst został utworzony
+        if webrtc_ctx:
             if webrtc_ctx.state.playing:
-                # Logika przetwarzania kolejki
                 try:
                     newly_scanned_codes = []
-                    # Sprawdź, czy result_queue istnieje przed użyciem
                     if "result_queue" in st.session_state and st.session_state.result_queue is not None:
                         while not st.session_state.result_queue.empty():
                             scanned_value = st.session_state.result_queue.get_nowait()
@@ -213,18 +198,16 @@ if uploaded_file:
                             changed_data_in_run = True
                         if changed_data_in_run:
                             st.session_state.last_scan_message = {"text": f"✅ Zeskanowano: " + ", ".join(parts), "type": "success"}
-                            st.rerun() # Odśwież UI, aby pokazać zaktualizowane dane
-                except queue.Empty: pass # Normalne, jeśli kolejka jest pusta
-                except AttributeError: # Jeśli result_queue nagle stałoby się None
-                     st.error("Błąd wewnętrzny: Problem z dostępem do kolejki wyników skanowania.")
-                except Exception as e: 
-                    st.error(f"Błąd przetwarzania kolejki: {e}")
+                            # Usunięto st.rerun() stąd. Zmiana session_state powinna wystarczyć.
+                except queue.Empty: pass
+                except AttributeError: st.error("Błąd wewnętrzny: Problem z dostępem do kolejki wyników skanowania.")
+                except Exception as e: st.error(f"Błąd przetwarzania kolejki: {e}")
 
-            elif webrtc_ctx.state.error_message: # Jeśli jest konkretny błąd od WebRTC
+            elif webrtc_ctx.state.error_message:
                  st.error(f"Błąd WebRTC: {webrtc_ctx.state.error_message}")
-            elif not desired_play_state: # Jeśli skaner został zatrzymany przez użytkownika
-                pass # Komunikat "Skaner zatrzymany" jest już wyświetlany przez message_placeholder_scan
-            else: # Inne stany (np. próba połączenia, brak uprawnień)
+            elif not desired_play_state:
+                pass 
+            else: 
                 st.warning(
                     f"Stan kamery: {webrtc_ctx.state.signaling_state} / {webrtc_ctx.state.ice_connection_state} / {webrtc_ctx.state.connection_state}. "
                     "Oczekiwanie na połączenie lub dostęp do kamery. "
@@ -232,11 +215,10 @@ if uploaded_file:
                     "Jeśli problem będzie się powtarzał, odśwież stronę.", icon="⏳")
                 if hasattr(webrtc_ctx.state, 'ice_gathering_state') and webrtc_ctx.state.ice_gathering_state == 'failed':
                     st.caption("Problem z zbieraniem kandydatów ICE. Może to być problem z siecią/firewallem lub konfiguracją STUN/TURN.")
-        else: # Jeśli webrtc_ctx jest None (nie udało się utworzyć komponentu)
+        else:
             st.error("Nie udało się zainicjalizować komponentu kamery WebRTC. Sprawdź logi aplikacji.")
     
     # Wyświetlanie tabeli porównawczej
-    # Upewnij się, że stany_magazynowe istnieje i nie jest None przed próbą użycia
     magazyn_df_exists_and_loaded = 'stany_magazynowe' in locals() and stany_magazynowe is not None
 
     if st.session_state.zeskanowane or (uploaded_file and magazyn_df_exists_and_loaded):
@@ -262,7 +244,7 @@ if uploaded_file:
             df_display["zeskanowano"] = df_display["zeskanowano"].fillna(0).astype(int)
             df_display["stan"] = df_display["stan"].fillna(0).astype(int)
 
-        elif st.session_state.zeskanowane: # Tylko skany, brak danych magazynowych
+        elif st.session_state.zeskanowane:
             df_display = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
             df_display["stan"] = 0
         
@@ -274,10 +256,9 @@ if uploaded_file:
             df_display["różnica"] = df_display["zeskanowano"] - df_display["stan"]
             df_display = df_display.sort_values(by=['różnica', 'model'], ascending=[True, True])
         else: 
-            if uploaded_file: # Jeśli plik był wgrany, ale tabela nadal pusta
+            if uploaded_file:
                  st.info("Brak danych do wyświetlenia. Sprawdź zawartość pliku Excel lub rozpocznij skanowanie.")
 
-        # Wyświetl tabelę i przycisk pobierania tylko jeśli tabela nie jest pusta
         if not df_display.empty:
             st.dataframe(df_display.style.applymap(highlight_diff, subset=['różnica']), use_container_width=True, hide_index=True)
             
@@ -285,13 +266,12 @@ if uploaded_file:
             df_display.to_excel(excel_buffer, index=False, sheet_name="RaportInwentaryzacji", engine='openpyxl')
             excel_buffer.seek(0)
             st.download_button(label="📥 Pobierz raport różnic (Excel)", data=excel_buffer, file_name="raport_inwentaryzacja.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        elif st.session_state.zeskanowane: # Są skany, ale tabela wynikowa pusta (np. brak danych magazynowych)
+        elif st.session_state.zeskanowane:
             st.info("Zeskanowano modele, ale brak danych magazynowych do porównania. Wgraj plik Excel.")
-        elif uploaded_file: # Plik wgrany, ale brak skanów i dane w pliku nie wygenerowały tabeli
+        elif uploaded_file:
             st.info("Wgrano plik, ale nie zawiera on danych lub nie ma jeszcze zeskanowanych modeli.")
-
-else: # Jeśli uploaded_file is None
+else:
     st.info("👋 Witaj! Aby rozpocząć, wgraj plik Excel ze stanem magazynowym z panelu po lewej stronie.")
     st.markdown("Plik Excel powinien zawierać kolumny `model` oraz `stan`.")
-    if st.session_state.get("scanner_active", False): # Użyj .get() dla bezpieczeństwa
+    if st.session_state.get("scanner_active", False):
         st.warning("Skaner QR został aktywowany, ale plik Excel nie został jeszcze wgrany. Funkcjonalność będzie ograniczona.")
