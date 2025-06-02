@@ -1,7 +1,7 @@
 import streamlit as st
+import streamlit.components.v1 as components  # ← WAŻNE!
 import pandas as pd
 import io
-import uuid
 
 # === Funkcja kolorująca różnicę tylko w kolumnie 'różnica' ===
 def highlight_diff(val):
