@@ -52,14 +52,15 @@ if uploaded_file:
             st.session_state.zeskanowane[model] = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.input_model = ""  # czyścimy pole input
 
-    # Pole tekstowe ze skanerem / wpisem modelu
+    # Pole tekstowe ze skanerem lub ręcznym wpisem
     st.text_input(
         "Zeskanuj kod modelu (lub wpisz ręcznie i naciśnij Enter)",
         key="input_model",
-        on_change=lambda: scan_model()
+        on_change=scan_model
     )
-    # ➕ Dodatkowa opcja: kamera do QR (na telefonie lub komputerze z kamerą)
-    with st.expander("📷 Skanuj kod QR kamerą"):
+
+    # ➕ Dodatkowa opcja: skanowanie kamerą (na telefonie)
+    with st.expander("📷 Skanuj kod QR kamerą (np. na telefonie)"):
         qr_code_scanner = """
         <!DOCTYPE html>
         <html>
@@ -89,7 +90,7 @@ if uploaded_file:
           </body>
         </html>
         """
-    components.html(qr_code_scanner, height=400)
+        components.html(qr_code_scanner, height=400)
 
     # Przycisk do wyczyszczenia sesji
     if st.button("🗑️ Wyczyść wszystkie skany"):
@@ -99,8 +100,8 @@ if uploaded_file:
     # Porównanie z rzeczywistym stanem
     df_skan = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
     df_pelne = stany_magazynowe.merge(df_skan, on="model", how="outer").fillna(0)
-   
-    #Usuń wiersze bez modelu (NaN lub puste ciągi)
+
+    # Usuń puste modele
     df_pelne["model"] = df_pelne["model"].astype(str).str.strip()
     df_pelne = df_pelne[df_pelne["model"] != "nan"]
     df_pelne = df_pelne[df_pelne["model"] != ""]
