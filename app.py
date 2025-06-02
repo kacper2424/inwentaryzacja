@@ -56,7 +56,7 @@ if uploaded_file:
     st.text_input(
         "Zeskanuj kod modelu (lub wpisz ręcznie i naciśnij Enter)",
         key="input_model",
-        on_change=scan_model
+        on_change=lambda: scan_model()
     )
     # ➕ Dodatkowa opcja: kamera do QR (na telefonie lub komputerze z kamerą)
     with st.expander("📷 Skanuj kod QR kamerą"):
