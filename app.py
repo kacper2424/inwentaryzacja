@@ -67,7 +67,15 @@ if uploaded_file:
     # Porównanie z rzeczywistym stanem
     df_skan = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
     df_pelne = stany_magazynowe.merge(df_skan, on="model", how="outer").fillna(0)
+   
+    #Usuń wiersze bez modelu (NaN lub puste ciągi)
+    df_pelne["model"] = df_pelne["model"].astype(str).str.strip()
+    df_pelne = df_pelne[df_pelne["model"] != "nan"]
+    df_pelne = df_pelne[df_pelne["model"] != ""]
+
+    # Dalej przetwarzaj dane
     df_pelne["zeskanowano"] = df_pelne["zeskanowano"].astype(int)
+    df_pelne["stan"] = df_pelne["stan"].astype(int)
     df_pelne["różnica"] = df_pelne["zeskanowano"] - df_pelne["stan"]
 
     st.subheader("📊 Porównanie stanów")
