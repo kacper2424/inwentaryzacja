@@ -2,14 +2,11 @@ import streamlit as st
 import pandas as pd
 import io
 from PIL import Image
-import cv2
+import cv2 # Do ewentualnego rysowania na obrazie (opcjonalne w tej wersji)
 import numpy as np
-import time
-import queue
+from collections import Counter # Do łatwego zliczania wystąpień
 
 from pyzbar.pyzbar import decode as pyzbar_decode
-
-from streamlit_webrtc import VideoProcessorBase, webrtc_streamer, RTCConfiguration, WebRtcMode
 
 # === Funkcja kolorująca różnicę tylko w kolumnie 'różnica' ===
 def highlight_diff(val):
@@ -27,92 +24,55 @@ def load_data(file):
     df.columns = [col.lower().strip() for col in df.columns]
     required_cols = {'model', 'stan'}
     if not required_cols.issubset(df.columns):
-        raise ValueError("Plik Excel musi zawierać kolumny: 'model' oraz 'stan'. Sprawdź nazwy kolumn i ewentualne spacje.")
+        raise ValueError("Plik Excel musi zawierać kolumny: 'model' oraz 'stan'.")
     df = df[['model', 'stan']]
     df['model'] = df['model'].astype(str).str.strip()
     df['stan'] = pd.to_numeric(df['stan'], errors='coerce').fillna(0).astype(int)
     return df
 
-# === Procesor klatek wideo dla streamlit-webrtc z pyzbar ===
-class QRScannerProcessorPyzbar(VideoProcessorBase):
-    def __init__(self, result_queue: queue.Queue):
-        self.last_scanned_value = None
-        self.last_scan_time = 0
-        self.scan_cooldown_seconds = 2.0
-        self.result_queue = result_queue
-        self._active = True
-
-    def set_active(self, active: bool):
-        self._active = active
-
-    def recv(self, frame):
-        if not self._active or self.result_queue is None:
-            return frame
-
-        img_bgr = frame.to_ndarray(format="bgr24")
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(img_rgb)
-        decoded_text_display = None
-        try:
-            decoded_objects = pyzbar_decode(pil_img)
-            current_time = time.time()
+# === Funkcja dekodująca WSZYSTKIE QR z obrazu za pomocą pyzbar ===
+def decode_all_qrs_from_image_pyzbar(image_bytes_io):
+    try:
+        pil_img = Image.open(image_bytes_io)
+        # Konwersja do skali szarości może poprawić detekcję, ale pyzbar często radzi sobie z RGB
+        # pil_img_gray = pil_img.convert('L')
+        # decoded_objects = pyzbar_decode(pil_img_gray)
+        decoded_objects = pyzbar_decode(pil_img)
+        
+        detected_texts = []
+        if decoded_objects:
             for obj in decoded_objects:
-                decoded_text = obj.data.decode("utf-8")
-                if decoded_text:
-                    if not (decoded_text == self.last_scanned_value and \
-                            (current_time - self.last_scan_time) < self.scan_cooldown_seconds):
-                        try:
-                            self.result_queue.put_nowait(decoded_text)
-                        except queue.Full:
-                            pass
-                        self.last_scanned_value = decoded_text
-                        self.last_scan_time = current_time
-                        decoded_text_display = f"OK: {decoded_text[:20]}..." if len(decoded_text) > 20 else f"OK: {decoded_text}"
-                    else:
-                        decoded_text_display = f"Scanned: {decoded_text[:20]}..." if len(decoded_text) > 20 else f"Scanned: {decoded_text}"
-                    
-                    (x, y, w, h) = obj.rect
-                    cv2.rectangle(img_bgr, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    if decoded_text_display:
-                        cv2.putText(img_bgr, decoded_text_display, (x, y - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-                    break 
-            return frame.from_ndarray(img_bgr, format="bgr24")
-        except Exception as e:
-            # print(f"Error in QRScannerProcessorPyzbar.recv: {e}")
-            return frame.from_ndarray(img_bgr, format="bgr24")
+                if obj.data: # Upewnij się, że dane istnieją
+                    detected_texts.append(obj.data.decode("utf-8").strip())
+        return detected_texts # Zwróć listę wszystkich zdekodowanych tekstów (mogą być duplikaty)
+    except Exception as e:
+        # st.error(f"Błąd podczas dekodowania QR (pyzbar): {e}")
+        return []
 
-# --- Główna aplikacja Streamlit ---
-st.set_page_config(page_title="📦 Inwentaryzacja Sprzętu (Live Scan)", layout="wide")
-st.title("📦 Inwentaryzacja sprzętu (Skanowanie Live)")
-
-RTC_CONFIGURATION = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-
-# --- Inicjalizacja stanu sesji ---
-if "result_queue" not in st.session_state:
-    st.session_state.result_queue = queue.Queue(maxsize=10)
-if "zeskanowane" not in st.session_state:
-    st.session_state.zeskanowane = {}
-if "input_model_manual" not in st.session_state:
-    st.session_state.input_model_manual = ""
-if "last_scan_message" not in st.session_state:
-    st.session_state.last_scan_message = {"text": "", "type": "info"}
-if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
+st.set_page_config(page_title="📦 Inwentaryzacja (Skan Zdjęć)", layout="wide")
+st.title("📦 Inwentaryzacja sprzętu (Skanowanie ze Zdjęcia)")
 
 # --- Kolumna boczna ---
 with st.sidebar:
     st.header("⚙️ Ustawienia")
     uploaded_file = st.file_uploader("Wgraj plik Excel ze stanem magazynowym", type=["xlsx"])
-    if st.button("🗑️ Wyczyść wszystkie skany", key="clear_scans_sidebar"):
+    if st.button("🗑️ Wyczyść wszystkie skany", key="clear_scans_photo_all"):
         st.session_state.zeskanowane = {}
-        st.session_state.last_scan_message = {"text": "", "type": "info"}
-        if "result_queue" in st.session_state:
-            while not st.session_state.result_queue.empty():
-                try: st.session_state.result_queue.get_nowait()
-                except queue.Empty: break
+        st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
+        if "show_camera_photo_all" in st.session_state:
+            st.session_state.show_camera_photo_all = False
         st.success("Wszystkie zeskanowane pozycje zostały wyczyszczone.")
         st.rerun()
+
+# --- Inicjalizacja stanu sesji ---
+if "zeskanowane" not in st.session_state:
+    st.session_state.zeskanowane = {}
+if "input_model_manual" not in st.session_state:
+    st.session_state.input_model_manual = ""
+if "last_scan_message_photo_all" not in st.session_state:
+    st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
+if "show_camera_photo_all" not in st.session_state:
+    st.session_state.show_camera_photo_all = False
 
 # --- Główna zawartość ---
 if uploaded_file:
@@ -129,108 +89,80 @@ if uploaded_file:
             count = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.zeskanowane[model] = count
             st.session_state.input_model_manual = "" 
-            st.session_state.last_scan_message = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
+            st.session_state.last_scan_message_photo_all = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
-        key="input_model_manual", 
+        key="input_model_manual_photo_all", 
         on_change=process_manually_entered_model, 
-        placeholder="Np. Laptop XYZ123"
-        # autofocus=True # CAŁKOWICIE USUNIĘTE NA CZAS TESTU
+        placeholder="Np. Laptop XYZ123",
+        autofocus=not st.session_state.get("show_camera_photo_all", False)
     )
     st.markdown("---")
 
-    st.subheader("📷 Skaner QR Live (z pyzbar)")
+    st.subheader("📸 Skaner QR (Zrób Zdjęcie - wszystkie kody)")
     
-    scanner_button_label = "🔛 Uruchom Skaner" if not st.session_state.scanner_active else "🛑 Zatrzymaj Skaner"
-    if st.button(scanner_button_label, key="toggle_scanner"):
-        st.session_state.scanner_active = not st.session_state.scanner_active
-        msg_text = "Skaner uruchomiony. Skieruj kamerę na kod QR." if st.session_state.scanner_active else "Skaner zatrzymany."
-        st.session_state.last_scan_message = {"text": msg_text, "type": "info"}
+    camera_button_label = "📷 Uruchom Kamerę" if not st.session_state.show_camera_photo_all else "📸 Ukryj Kamerę"
+    if st.button(camera_button_label, key="toggle_camera_button_photo_all"):
+        st.session_state.show_camera_photo_all = not st.session_state.show_camera_photo_all
+        st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
         st.rerun()
 
-    message_placeholder_scan = st.empty()
-    if st.session_state.last_scan_message["text"]:
-        msg = st.session_state.last_scan_message
-        if msg["type"] == "success": message_placeholder_scan.success(msg["text"], icon="🎉")
-        elif msg["type"] == "warning": message_placeholder_scan.warning(msg["text"], icon="⚠️")
-        elif msg["type"] == "info": message_placeholder_scan.info(msg["text"], icon="ℹ️")
-        elif msg["type"] == "error": message_placeholder_scan.error(msg["text"], icon="❌")
+    message_placeholder_photo_all = st.empty()
+    if st.session_state.last_scan_message_photo_all["text"]:
+        msg = st.session_state.last_scan_message_photo_all
+        if msg["type"] == "success": message_placeholder_photo_all.success(msg["text"], icon="🎉")
+        elif msg["type"] == "warning": message_placeholder_photo_all.warning(msg["text"], icon="⚠️")
+        elif msg["type"] == "info": message_placeholder_photo_all.info(msg["text"], icon="ℹ️")
 
-    if st.session_state.scanner_active:
-        st.info("Próba uruchomienia kamery... Upewnij się, że przeglądarka ma uprawnienia dostępu do kamery.", icon="📸")
-
-        def app_video_processor_factory_local_pyzbar():
-            if "result_queue" not in st.session_state:
-                st.session_state.result_queue = queue.Queue(maxsize=10) 
-            processor = QRScannerProcessorPyzbar(result_queue=st.session_state.result_queue)
-            processor.set_active(True) 
-            return processor
+    if st.session_state.show_camera_photo_all:
+        st.info("Ustaw kody QR przed obiektywem i kliknij 'Take photo'. Wszystkie wykryte kody ze zdjęcia zostaną dodane.", icon="🎯")
         
-        desired_play_state = st.session_state.scanner_active
-
-        webrtc_ctx = webrtc_streamer(
-            key="qr-live-scanner-pyzbar", 
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            video_processor_factory=app_video_processor_factory_local_pyzbar,
-            media_stream_constraints={"video": {"width": 640, "height": 480, "frameRate": {"ideal": 10, "max": 15}}, "audio": False},
-            async_processing=True,
-            desired_playing_state=desired_play_state
+        img_file_buffer = st.camera_input(
+            "Zrób zdjęcie kodów QR", 
+            key="qr_camera_photo_all_shot", 
+            label_visibility="collapsed"
         )
 
-        if webrtc_ctx:
-            if webrtc_ctx.state.playing:
-                try:
-                    newly_scanned_codes = []
-                    if "result_queue" in st.session_state and st.session_state.result_queue is not None:
-                        while not st.session_state.result_queue.empty():
-                            scanned_value = st.session_state.result_queue.get_nowait()
-                            newly_scanned_codes.append(scanned_value)
-                    
-                    if newly_scanned_codes:
-                        parts = []
-                        changed_data_in_run = False
-                        for text in newly_scanned_codes:
-                            count = st.session_state.zeskanowane.get(text, 0) + 1
-                            st.session_state.zeskanowane[text] = count
-                            parts.append(f"**{text}** (ilość: {count})")
-                            changed_data_in_run = True
-                        if changed_data_in_run:
-                            st.session_state.last_scan_message = {"text": f"✅ Zeskanowano: " + ", ".join(parts), "type": "success"}
-                except queue.Empty: pass
-                except AttributeError: st.error("Błąd wewnętrzny: Problem z dostępem do kolejki wyników skanowania.")
-                except Exception as e: st.error(f"Błąd przetwarzania kolejki: {e}")
+        if img_file_buffer is not None:
+            bytes_data = img_file_buffer.getvalue()
+            with st.spinner("🔍 Przetwarzanie zdjęcia..."):
+                # Dekoduj wszystkie kody QR ze zdjęcia
+                decoded_qr_texts_list = decode_all_qrs_from_image_pyzbar(io.BytesIO(bytes_data))
 
-            elif webrtc_ctx.state.error_message:
-                 st.error(f"Błąd WebRTC: {webrtc_ctx.state.error_message}")
-            elif not desired_play_state:
-                pass 
-            else: 
-                st.warning(
-                    f"Stan kamery: {webrtc_ctx.state.signaling_state} / {webrtc_ctx.state.ice_connection_state} / {webrtc_ctx.state.connection_state}. "
-                    "Oczekiwanie na połączenie lub dostęp do kamery. "
-                    "Sprawdź uprawnienia kamery w przeglądarce i połączenie sieciowe. "
-                    "Jeśli problem będzie się powtarzał, odśwież stronę.", icon="⏳")
-                if hasattr(webrtc_ctx.state, 'ice_gathering_state') and webrtc_ctx.state.ice_gathering_state == 'failed':
-                    st.caption("Problem z zbieraniem kandydatów ICE. Może to być problem z siecią/firewallem lub konfiguracją STUN/TURN.")
-        else:
-            st.error("Nie udało się zainicjalizować komponentu kamery WebRTC. Sprawdź logi aplikacji.")
-    
-    # Wyświetlanie tabeli porównawczej
+            if decoded_qr_texts_list: # Jeśli lista nie jest pusta
+                # Zlicz wystąpienia każdego kodu na zdjęciu
+                codes_on_photo_counts = Counter(decoded_qr_texts_list)
+                
+                added_models_summary = []
+                for qr_text, num_on_photo in codes_on_photo_counts.items():
+                    current_inventory_count = st.session_state.zeskanowane.get(qr_text, 0)
+                    new_inventory_count = current_inventory_count + num_on_photo
+                    st.session_state.zeskanowane[qr_text] = new_inventory_count
+                    added_models_summary.append(f"**{qr_text}** (+{num_on_photo}, nowa ilość: {new_inventory_count})")
+                
+                st.session_state.last_scan_message_photo_all = {
+                    "text": f"✅ Zeskanowano i dodano: {'; '.join(added_models_summary)}", 
+                    "type": "success"
+                }
+            elif img_file_buffer is not None: # Jeśli zrobiono zdjęcie, ale nic nie odczytano
+                st.session_state.last_scan_message_photo_all = {
+                    "text": "⚠️ Nie udało się odczytać żadnego kodu QR ze zdjęcia. Spróbuj ponownie.", 
+                    "type": "warning"
+                }
+            st.rerun() 
+
+    # Wyświetlanie tabeli porównawczej (bez zmian w logice tabeli)
     magazyn_df_exists_and_loaded = 'stany_magazynowe' in locals() and stany_magazynowe is not None
-
     if st.session_state.zeskanowane or (uploaded_file and magazyn_df_exists_and_loaded):
         st.markdown("---")
         st.subheader("📊 Porównanie stanów")
         df_display = pd.DataFrame(columns=['model', 'stan', 'zeskanowano', 'różnica']) 
-        
         if magazyn_df_exists_and_loaded and not stany_magazynowe.empty:
             df_display = stany_magazynowe.copy()
             df_display["zeskanowano"] = 0 
             for idx in range(len(df_display)):
                 model_name = df_display.loc[idx, 'model']
-                if model_name in st.session_state.zeskanowane:
-                    df_display.loc[idx, 'zeskanowano'] = st.session_state.zeskanowane[model_name]
+                df_display.loc[idx, 'zeskanowano'] = st.session_state.zeskanowane.get(model_name, 0) # Użyj .get() dla bezpieczeństwa
             
             modele_tylko_w_skanach = []
             for skan_model, skan_ilosc in st.session_state.zeskanowane.items():
@@ -241,8 +173,7 @@ if uploaded_file:
             
             df_display["zeskanowano"] = df_display["zeskanowano"].fillna(0).astype(int)
             df_display["stan"] = df_display["stan"].fillna(0).astype(int)
-
-        elif st.session_state.zeskanowane:
+        elif st.session_state.zeskanowane: # Tylko skany, brak pliku magazynowego
             df_display = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
             df_display["stan"] = 0
         
@@ -254,22 +185,20 @@ if uploaded_file:
             df_display["różnica"] = df_display["zeskanowano"] - df_display["stan"]
             df_display = df_display.sort_values(by=['różnica', 'model'], ascending=[True, True])
         else: 
-            if uploaded_file:
-                 st.info("Brak danych do wyświetlenia. Sprawdź zawartość pliku Excel lub rozpocznij skanowanie.")
+            if uploaded_file: st.info("Brak danych do wyświetlenia. Sprawdź zawartość pliku Excel lub rozpocznij skanowanie.")
 
         if not df_display.empty:
             st.dataframe(df_display.style.applymap(highlight_diff, subset=['różnica']), use_container_width=True, hide_index=True)
-            
             excel_buffer = io.BytesIO()
             df_display.to_excel(excel_buffer, index=False, sheet_name="RaportInwentaryzacji", engine='openpyxl')
             excel_buffer.seek(0)
             st.download_button(label="📥 Pobierz raport różnic (Excel)", data=excel_buffer, file_name="raport_inwentaryzacja.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        elif st.session_state.zeskanowane:
+        elif st.session_state.zeskanowane: 
             st.info("Zeskanowano modele, ale brak danych magazynowych do porównania. Wgraj plik Excel.")
-        elif uploaded_file:
+        elif uploaded_file: 
             st.info("Wgrano plik, ale nie zawiera on danych lub nie ma jeszcze zeskanowanych modeli.")
 else:
     st.info("👋 Witaj! Aby rozpocząć, wgraj plik Excel ze stanem magazynowym z panelu po lewej stronie.")
     st.markdown("Plik Excel powinien zawierać kolumny `model` oraz `stan`.")
-    if st.session_state.get("scanner_active", False):
-        st.warning("Skaner QR został aktywowany, ale plik Excel nie został jeszcze wgrany. Funkcjonalność będzie ograniczona.")
+    if st.session_state.get("show_camera_photo_all", False):
+        st.warning("Plik Excel nie jest załadowany. Skanowanie QR jest obecnie niedostępne.")
