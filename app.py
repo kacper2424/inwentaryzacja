@@ -65,46 +65,53 @@ if uploaded_file:
     # === Rozwijana kamera QR ===
     with st.expander("📷 Skanuj kod QR kamerą (kliknij aby uruchomić)"):
         qr_code_scanner_html = """
-        <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
-        <div style="display:flex; justify-content:center;">
-          <div id="reader" style="width: 300px;"></div>
-        </div>
-        <div id="qr-error" style="color:red; text-align:center; margin-top:10px;"></div>
-        <script>
-          const qrErrorBox = document.getElementById("qr-error");
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  </head>
+  <body>
+    <div style="text-align:center;">
+      <div id="reader" style="width: 300px; margin: auto;"></div>
+      <div id="qr-error" style="color:red; margin-top:10px;"></div>
+    </div>
+    <script>
+      function onScanSuccess(decodedText, decodedResult) {
+        const inputBox = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+        if (inputBox) {
+          inputBox.value = decodedText;
+          inputBox.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
 
-          function onScanSuccess(decodedText, decodedResult) {
-            const streamlitInput = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-            if (streamlitInput) {
-              streamlitInput.value = decodedText;
-              const event = new Event('input', { bubbles: true });
-              streamlitInput.dispatchEvent(event);
-            }
-          }
+      function onScanFailure(error) {
+        console.warn(`QR scan error: ${error}`);
+      }
 
-          function onScanFailure(error) {
-            console.warn(`QR scan error: ${error}`);
-          }
+      const qrErrorBox = document.getElementById("qr-error");
 
+      Html5Qrcode.getCameras().then(cameras => {
+        if (cameras && cameras.length) {
           const html5QrCode = new Html5Qrcode("reader");
-          Html5Qrcode.getCameras().then(cameras => {
-            if (cameras && cameras.length) {
-              html5QrCode.start(
-                { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                onScanSuccess,
-                onScanFailure
-              ).catch(err => {
-                qrErrorBox.innerText = "❌ Błąd uruchamiania kamery: " + err;
-              });
-            } else {
-              qrErrorBox.innerText = "❌ Nie wykryto żadnej kamery.";
-            }
-          }).catch(err => {
-            qrErrorBox.innerText = "❌ Błąd pobierania kamer: " + err;
+          html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            onScanSuccess,
+            onScanFailure
+          ).catch(err => {
+            qrErrorBox.innerText = "❌ Błąd uruchamiania kamery: " + err;
           });
-        </script>
-        """
+        } else {
+          qrErrorBox.innerText = "❌ Nie wykryto żadnej kamery.";
+        }
+      }).catch(err => {
+        qrErrorBox.innerText = "❌ Błąd pobierania kamer: " + err;
+      });
+    </script>
+  </body>
+</html>
+"""
+
         components.html(qr_code_scanner_html, height=450)
 
     # === Przycisk czyszczenia skanów ===
