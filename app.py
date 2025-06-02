@@ -134,8 +134,8 @@ if uploaded_file:
         "Wpisz model ręcznie i naciśnij Enter:", 
         key="input_model_manual", 
         on_change=process_manually_entered_model, 
-        placeholder="Np. Laptop XYZ123",
-        autofocus=True # Ustaw autofocus na stałe True
+        placeholder="Np. Laptop XYZ123"
+        # autofocus=True # CAŁKOWICIE USUNIĘTE NA CZAS TESTU
     )
     st.markdown("---")
 
