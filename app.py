@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import io
 from PIL import Image
-import cv2 
-import numpy as np
+# import cv2 # OpenCV nie jest już bezpośrednio potrzebne do dekodowania, ale PIL może go używać pod spodem
+# import numpy as np # numpy może być używane przez pandas lub PIL
 from collections import Counter 
 
 from pyzbar.pyzbar import decode as pyzbar_decode
@@ -43,7 +43,7 @@ def decode_all_qrs_from_image_pyzbar(image_bytes_io):
                     detected_texts.append(obj.data.decode("utf-8").strip())
         return detected_texts
     except Exception as e:
-        # st.warning(f"Błąd dekodowania QR (pyzbar): {e}") # Można włączyć dla debugowania
+        # st.warning(f"Błąd dekodowania QR (pyzbar): {e}") # Można odkomentować do debugowania
         return []
 
 st.set_page_config(page_title="📦 Inwentaryzacja (Skan Zdjęć)", layout="wide")
@@ -90,10 +90,10 @@ if uploaded_file:
             # st.rerun() # Zmiana session_state i on_change powinny wystarczyć
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
-        key="input_model_manual_photo_all", # Upewnij się, że klucz jest unikalny
+        key="input_model_manual_photo_all",
         on_change=process_manually_entered_model, 
         placeholder="Np. Laptop XYZ123"
-        # autofocus został usunięty
+        # autofocus został usunięty, aby uniknąć potencjalnych błędów TypeError
     )
     st.markdown("---")
 
@@ -102,7 +102,7 @@ if uploaded_file:
     camera_button_label = "📷 Uruchom Kamerę" if not st.session_state.show_camera_photo_all else "📸 Ukryj Kamerę"
     if st.button(camera_button_label, key="toggle_camera_button_photo_all"):
         st.session_state.show_camera_photo_all = not st.session_state.show_camera_photo_all
-        st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
+        st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"} # Czyść komunikat przy przełączaniu
         st.rerun()
 
     message_placeholder_photo_all = st.empty()
@@ -117,11 +117,11 @@ if uploaded_file:
         
         img_file_buffer = st.camera_input(
             "Zrób zdjęcie kodów QR", 
-            key="qr_camera_photo_all_shot", 
+            key="qr_camera_photo_all_shot", # Stały klucz dla tego widgetu
             label_visibility="collapsed"
         )
 
-        if img_file_buffer is not None:
+        if img_file_buffer is not None: # Wykonuje się tylko raz po zrobieniu nowego zdjęcia
             bytes_data = img_file_buffer.getvalue()
             with st.spinner("🔍 Przetwarzanie zdjęcia..."):
                 decoded_qr_texts_list = decode_all_qrs_from_image_pyzbar(io.BytesIO(bytes_data))
@@ -139,19 +139,21 @@ if uploaded_file:
                     "text": f"✅ Zeskanowano i dodano: {'; '.join(added_models_summary)}", 
                     "type": "success"
                 }
-            elif img_file_buffer is not None: 
+            else: # Jeśli zrobiono zdjęcie (img_file_buffer nie jest None), ale lista kodów jest pusta
                 st.session_state.last_scan_message_photo_all = {
                     "text": "⚠️ Nie udało się odczytać żadnego kodu QR ze zdjęcia. Spróbuj ponownie.", 
                     "type": "warning"
                 }
-            st.rerun() 
+            st.rerun() # Kluczowe: odświeża UI i resetuje img_file_buffer do None
 
     # Wyświetlanie tabeli porównawczej
     magazyn_df_exists_and_loaded = 'stany_magazynowe' in locals() and stany_magazynowe is not None
+
     if st.session_state.zeskanowane or (uploaded_file and magazyn_df_exists_and_loaded):
         st.markdown("---")
         st.subheader("📊 Porównanie stanów")
         df_display = pd.DataFrame(columns=['model', 'stan', 'zeskanowano', 'różnica']) 
+        
         if magazyn_df_exists_and_loaded and not stany_magazynowe.empty:
             df_display = stany_magazynowe.copy()
             df_display["zeskanowano"] = 0 
@@ -195,5 +197,5 @@ if uploaded_file:
 else:
     st.info("👋 Witaj! Aby rozpocząć, wgraj plik Excel ze stanem magazynowym z panelu po lewej stronie.")
     st.markdown("Plik Excel powinien zawierać kolumny `model` oraz `stan`.")
-    if st.session_state.get("show_camera_photo_all", False):
+    if st.session_state.get("show_camera_photo_all", False): # Użyj .get() dla bezpieczeństwa
         st.warning("Plik Excel nie jest załadowany. Skanowanie QR jest obecnie niedostępne.")
