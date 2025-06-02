@@ -79,7 +79,7 @@ class QRScannerProcessorPyzbar(VideoProcessorBase):
                     break 
             return frame.from_ndarray(img_bgr, format="bgr24")
         except Exception as e:
-            # print(f"Error in QRScannerProcessorPyzbar.recv: {e}") # Do debugowania
+            # print(f"Error in QRScannerProcessorPyzbar.recv: {e}")
             return frame.from_ndarray(img_bgr, format="bgr24")
 
 # --- Główna aplikacja Streamlit ---
@@ -98,7 +98,7 @@ if "input_model_manual" not in st.session_state:
 if "last_scan_message" not in st.session_state:
     st.session_state.last_scan_message = {"text": "", "type": "info"}
 if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False # Domyślnie skaner jest nieaktywny
+    st.session_state.scanner_active = False
 
 # --- Kolumna boczna ---
 with st.sidebar:
@@ -135,7 +135,7 @@ if uploaded_file:
         key="input_model_manual", 
         on_change=process_manually_entered_model, 
         placeholder="Np. Laptop XYZ123",
-        autofocus=not st.session_state.get("scanner_active", False) # Użyj .get() dla bezpieczeństwa
+        autofocus=True # Ustaw autofocus na stałe True
     )
     st.markdown("---")
 
