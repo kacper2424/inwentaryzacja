@@ -8,7 +8,7 @@ def highlight_diff(val):
     if val < 0:
         color = 'red'
     elif val > 0:
-        color = 'yellow'
+        color = 'blue'
     else:
         color = ''
     return f'color: {color}'
