@@ -3,3 +3,6 @@ pandas
 openpyxl
 Pillow
 opencv-python-headless
+streamlit-webrtc
+aiortc
+av
