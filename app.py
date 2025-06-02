@@ -62,7 +62,7 @@ if uploaded_file:
     # Przycisk do wyczyszczenia sesji
     if st.button("🗑️ Wyczyść wszystkie skany"):
         st.session_state.zeskanowane = {}
-        st.experimental_rerun()
+        st.rerun()
 
     # Porównanie z rzeczywistym stanem
     df_skan = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
