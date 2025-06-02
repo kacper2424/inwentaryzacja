@@ -79,6 +79,7 @@ class QRScannerProcessorPyzbar(VideoProcessorBase):
                     break 
             return frame.from_ndarray(img_bgr, format="bgr24")
         except Exception as e:
+            # print(f"Error in QRScannerProcessorPyzbar.recv: {e}") # Do debugowania
             return frame.from_ndarray(img_bgr, format="bgr24")
 
 # --- Główna aplikacja Streamlit ---
@@ -97,7 +98,7 @@ if "input_model_manual" not in st.session_state:
 if "last_scan_message" not in st.session_state:
     st.session_state.last_scan_message = {"text": "", "type": "info"}
 if "scanner_active" not in st.session_state:
-    st.session_state.scanner_active = False
+    st.session_state.scanner_active = False # Domyślnie skaner jest nieaktywny
 
 # --- Kolumna boczna ---
 with st.sidebar:
@@ -127,16 +128,14 @@ if uploaded_file:
         if model:
             count = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.zeskanowane[model] = count
-            st.session_state.input_model_manual = "" # Czyść pole po przetworzeniu
+            st.session_state.input_model_manual = "" 
             st.session_state.last_scan_message = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
-            # Nie ma potrzeby st.rerun() tutaj, on_change i zmiana session_state to zrobią
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
         key="input_model_manual", 
         on_change=process_manually_entered_model, 
         placeholder="Np. Laptop XYZ123",
-        autofocus=not st.session_state.scanner_active # Ustaw autofocus tylko jeśli skaner nie jest aktywny
-                                                      # lub przy pierwszym ładowaniu tej sekcji
+        autofocus=not st.session_state.get("scanner_active", False) # Użyj .get() dla bezpieczeństwa
     )
     st.markdown("---")
 
@@ -147,7 +146,7 @@ if uploaded_file:
         st.session_state.scanner_active = not st.session_state.scanner_active
         msg_text = "Skaner uruchomiony. Skieruj kamerę na kod QR." if st.session_state.scanner_active else "Skaner zatrzymany."
         st.session_state.last_scan_message = {"text": msg_text, "type": "info"}
-        st.rerun() # Rerun jest OK po akcji przycisku
+        st.rerun()
 
     message_placeholder_scan = st.empty()
     if st.session_state.last_scan_message["text"]:
@@ -198,7 +197,6 @@ if uploaded_file:
                             changed_data_in_run = True
                         if changed_data_in_run:
                             st.session_state.last_scan_message = {"text": f"✅ Zeskanowano: " + ", ".join(parts), "type": "success"}
-                            # Usunięto st.rerun() stąd. Zmiana session_state powinna wystarczyć.
                 except queue.Empty: pass
                 except AttributeError: st.error("Błąd wewnętrzny: Problem z dostępem do kolejki wyników skanowania.")
                 except Exception as e: st.error(f"Błąd przetwarzania kolejki: {e}")
