@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import io
 from PIL import Image
-import cv2 # Do ewentualnego rysowania na obrazie (opcjonalne w tej wersji)
+import cv2 
 import numpy as np
-from collections import Counter # Do łatwego zliczania wystąpień
+from collections import Counter 
 
 from pyzbar.pyzbar import decode as pyzbar_decode
 
@@ -34,19 +34,16 @@ def load_data(file):
 def decode_all_qrs_from_image_pyzbar(image_bytes_io):
     try:
         pil_img = Image.open(image_bytes_io)
-        # Konwersja do skali szarości może poprawić detekcję, ale pyzbar często radzi sobie z RGB
-        # pil_img_gray = pil_img.convert('L')
-        # decoded_objects = pyzbar_decode(pil_img_gray)
         decoded_objects = pyzbar_decode(pil_img)
         
         detected_texts = []
         if decoded_objects:
             for obj in decoded_objects:
-                if obj.data: # Upewnij się, że dane istnieją
+                if obj.data:
                     detected_texts.append(obj.data.decode("utf-8").strip())
-        return detected_texts # Zwróć listę wszystkich zdekodowanych tekstów (mogą być duplikaty)
+        return detected_texts
     except Exception as e:
-        # st.error(f"Błąd podczas dekodowania QR (pyzbar): {e}")
+        # st.warning(f"Błąd dekodowania QR (pyzbar): {e}") # Można włączyć dla debugowania
         return []
 
 st.set_page_config(page_title="📦 Inwentaryzacja (Skan Zdjęć)", layout="wide")
@@ -90,12 +87,13 @@ if uploaded_file:
             st.session_state.zeskanowane[model] = count
             st.session_state.input_model_manual = "" 
             st.session_state.last_scan_message_photo_all = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
+            # st.rerun() # Zmiana session_state i on_change powinny wystarczyć
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
-        key="input_model_manual_photo_all", 
+        key="input_model_manual_photo_all", # Upewnij się, że klucz jest unikalny
         on_change=process_manually_entered_model, 
-        placeholder="Np. Laptop XYZ123",
-        autofocus=not st.session_state.get("show_camera_photo_all", False)
+        placeholder="Np. Laptop XYZ123"
+        # autofocus został usunięty
     )
     st.markdown("---")
 
@@ -126,13 +124,10 @@ if uploaded_file:
         if img_file_buffer is not None:
             bytes_data = img_file_buffer.getvalue()
             with st.spinner("🔍 Przetwarzanie zdjęcia..."):
-                # Dekoduj wszystkie kody QR ze zdjęcia
                 decoded_qr_texts_list = decode_all_qrs_from_image_pyzbar(io.BytesIO(bytes_data))
 
-            if decoded_qr_texts_list: # Jeśli lista nie jest pusta
-                # Zlicz wystąpienia każdego kodu na zdjęciu
+            if decoded_qr_texts_list:
                 codes_on_photo_counts = Counter(decoded_qr_texts_list)
-                
                 added_models_summary = []
                 for qr_text, num_on_photo in codes_on_photo_counts.items():
                     current_inventory_count = st.session_state.zeskanowane.get(qr_text, 0)
@@ -144,14 +139,14 @@ if uploaded_file:
                     "text": f"✅ Zeskanowano i dodano: {'; '.join(added_models_summary)}", 
                     "type": "success"
                 }
-            elif img_file_buffer is not None: # Jeśli zrobiono zdjęcie, ale nic nie odczytano
+            elif img_file_buffer is not None: 
                 st.session_state.last_scan_message_photo_all = {
                     "text": "⚠️ Nie udało się odczytać żadnego kodu QR ze zdjęcia. Spróbuj ponownie.", 
                     "type": "warning"
                 }
             st.rerun() 
 
-    # Wyświetlanie tabeli porównawczej (bez zmian w logice tabeli)
+    # Wyświetlanie tabeli porównawczej
     magazyn_df_exists_and_loaded = 'stany_magazynowe' in locals() and stany_magazynowe is not None
     if st.session_state.zeskanowane or (uploaded_file and magazyn_df_exists_and_loaded):
         st.markdown("---")
@@ -162,7 +157,7 @@ if uploaded_file:
             df_display["zeskanowano"] = 0 
             for idx in range(len(df_display)):
                 model_name = df_display.loc[idx, 'model']
-                df_display.loc[idx, 'zeskanowano'] = st.session_state.zeskanowane.get(model_name, 0) # Użyj .get() dla bezpieczeństwa
+                df_display.loc[idx, 'zeskanowano'] = st.session_state.zeskanowane.get(model_name, 0)
             
             modele_tylko_w_skanach = []
             for skan_model, skan_ilosc in st.session_state.zeskanowane.items():
@@ -173,7 +168,7 @@ if uploaded_file:
             
             df_display["zeskanowano"] = df_display["zeskanowano"].fillna(0).astype(int)
             df_display["stan"] = df_display["stan"].fillna(0).astype(int)
-        elif st.session_state.zeskanowane: # Tylko skany, brak pliku magazynowego
+        elif st.session_state.zeskanowane:
             df_display = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
             df_display["stan"] = 0
         
