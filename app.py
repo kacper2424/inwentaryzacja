@@ -1,29 +1,24 @@
 import streamlit as st
-import streamlit.components.v1 as components  # ← WAŻNE!
+import streamlit.components.v1 as components
 import pandas as pd
 import io
 
 # === Funkcja kolorująca różnicę tylko w kolumnie 'różnica' ===
 def highlight_diff(val):
     if val < 0:
-        color = 'red'
+        return 'color: red'
     elif val > 0:
-        color = 'blue'
-    else:
-        color = ''
-    return f'color: {color}'
+        return 'color: blue'
+    return ''
 
 # === Wczytaj dane z Excela ===
 @st.cache_data
 def load_data(file):
     df = pd.read_excel(file)
     df.columns = [col.lower().strip() for col in df.columns]
-
-    # Walidacja kolumn
     required_cols = {'model', 'stan'}
     if not required_cols.issubset(df.columns):
         raise ValueError("Plik musi zawierać kolumny: model i stan")
-
     df = df[['model', 'stan']]
     df['model'] = df['model'].astype(str).str.strip()
     return df
@@ -38,83 +33,79 @@ if uploaded_file:
         st.error(f"Błąd wczytywania pliku: {e}")
         st.stop()
 
-    # Inicjalizacja sesji
+    # Sesja
     if "zeskanowane" not in st.session_state:
         st.session_state.zeskanowane = {}
 
     if "input_model" not in st.session_state:
         st.session_state.input_model = ""
 
-    # Funkcja wywoływana po wpisaniu modelu i naciśnięciu Enter
+    if "show_qr" not in st.session_state:
+        st.session_state.show_qr = False
+
+    # 📷 Przycisk aparatu obok inputa
+    cols = st.columns([4, 1])
+    with cols[0]:
+        st.text_input(
+            "Zeskanuj lub wpisz kod modelu:",
+            key="input_model",
+            on_change=lambda: scan_model()
+        )
+    with cols[1]:
+        if st.button("📷", use_container_width=True):
+            st.session_state.show_qr = not st.session_state.show_qr
+
+    # === Skanowanie z kamery ===
+    if st.session_state.show_qr:
+        st.info("Włączono kamerę. Zeskanuj kod QR.")
+        qr_code_html = """
+        <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+        <div id="reader" style="width: 100%;"></div>
+        <script>
+          const html5QrCode = new Html5Qrcode("reader");
+          html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+              const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+              if (input) {
+                input.value = decodedText;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+          );
+        </script>
+        """
+        components.html(qr_code_html, height=400)
+
+    # === Obsługa modelu ===
     def scan_model():
         model = st.session_state.input_model.strip()
         if model:
             st.session_state.zeskanowane[model] = st.session_state.zeskanowane.get(model, 0) + 1
-            st.session_state.input_model = ""  # czyścimy pole input
+            st.session_state.input_model = ""
 
-    # Pole tekstowe ze skanerem lub ręcznym wpisem
-    st.text_input(
-        "Zeskanuj kod modelu (lub wpisz ręcznie i naciśnij Enter)",
-        key="input_model",
-        on_change=scan_model
-    )
-
-    # ➕ Dodatkowa opcja: skanowanie kamerą (na telefonie)
-    with st.expander("📷 Skanuj kod QR kamerą (np. na telefonie)"):
-        qr_code_scanner = """
-        <!DOCTYPE html>
-        <html>
-          <body>
-            <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
-            <div id="reader" width="300px"></div>
-            <script>
-              function onScanSuccess(decodedText, decodedResult) {
-                const streamlitInput = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-                if (streamlitInput) {
-                  streamlitInput.value = decodedText;
-                  const event = new Event('input', { bubbles: true });
-                  streamlitInput.dispatchEvent(event);
-                }
-              }
-
-              const html5QrCode = new Html5Qrcode("reader");
-              html5QrCode.start(
-                { facingMode: "environment" },
-                {
-                  fps: 10,
-                  qrbox: { width: 250, height: 250 }
-                },
-                onScanSuccess
-              );
-            </script>
-          </body>
-        </html>
-        """
-        components.html(qr_code_scanner, height=400)
-
-    # Przycisk do wyczyszczenia sesji
+    # Przycisk do resetu
     if st.button("🗑️ Wyczyść wszystkie skany"):
         st.session_state.zeskanowane = {}
         st.rerun()
 
-    # Porównanie z rzeczywistym stanem
+    # Porównanie i raport
     df_skan = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
     df_pelne = stany_magazynowe.merge(df_skan, on="model", how="outer").fillna(0)
 
     # Usuń puste modele
     df_pelne["model"] = df_pelne["model"].astype(str).str.strip()
-    df_pelne = df_pelne[df_pelne["model"] != "nan"]
     df_pelne = df_pelne[df_pelne["model"] != ""]
+    df_pelne = df_pelne[df_pelne["model"].str.lower() != "nan"]
 
-    # Dalej przetwarzaj dane
-    df_pelne["zeskanowano"] = df_pelne["zeskanowano"].astype(int)
     df_pelne["stan"] = df_pelne["stan"].astype(int)
+    df_pelne["zeskanowano"] = df_pelne["zeskanowano"].astype(int)
     df_pelne["różnica"] = df_pelne["zeskanowano"] - df_pelne["stan"]
 
     st.subheader("📊 Porównanie stanów")
-    st.dataframe(df_pelne.style.applymap(highlight_diff, subset=['różnica']))
+    st.dataframe(df_pelne.style.applymap(highlight_diff, subset=["różnica"]))
 
-    # Eksport do Excela
     excel_buffer = io.BytesIO()
     df_pelne.to_excel(excel_buffer, index=False, engine='openpyxl')
     excel_buffer.seek(0)
