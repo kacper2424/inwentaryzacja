@@ -58,6 +58,38 @@ if uploaded_file:
         key="input_model",
         on_change=scan_model
     )
+    # ➕ Dodatkowa opcja: kamera do QR (na telefonie lub komputerze z kamerą)
+    with st.expander("📷 Skanuj kod QR kamerą"):
+        qr_code_scanner = """
+        <!DOCTYPE html>
+        <html>
+          <body>
+            <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+            <div id="reader" width="300px"></div>
+            <script>
+              function onScanSuccess(decodedText, decodedResult) {
+                const streamlitInput = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+                if (streamlitInput) {
+                  streamlitInput.value = decodedText;
+                  const event = new Event('input', { bubbles: true });
+                  streamlitInput.dispatchEvent(event);
+                }
+              }
+
+              const html5QrCode = new Html5Qrcode("reader");
+              html5QrCode.start(
+                { facingMode: "environment" },
+                {
+                  fps: 10,
+                  qrbox: { width: 250, height: 250 }
+                },
+                onScanSuccess
+              );
+            </script>
+          </body>
+        </html>
+        """
+    components.html(qr_code_scanner, height=400)
 
     # Przycisk do wyczyszczenia sesji
     if st.button("🗑️ Wyczyść wszystkie skany"):
