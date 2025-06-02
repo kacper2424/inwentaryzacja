@@ -40,8 +40,8 @@ class QRScannerProcessor(VideoProcessorBase):
         self.qr_decoder = cv2.QRCodeDetector()
         self.last_scanned_value = None
         self.last_scan_time = 0
-        self.scan_cooldown_seconds = 2  # Minimum 2 sekundy przerwy przed ponownym zeskanowaniem tego samego kodu
-        self.result_queue = result_queue # Kolejka do przekazywania wyników do głównego wątku Streamlit
+        self.scan_cooldown_seconds = 2
+        self.result_queue = result_queue
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -56,7 +56,7 @@ class QRScannerProcessor(VideoProcessorBase):
                 try:
                     self.result_queue.put_nowait(decoded_text)
                 except queue.Full:
-                    pass # Kolejka pełna, zignoruj
+                    pass
                 
                 self.last_scanned_value = decoded_text
                 self.last_scan_time = current_time
@@ -84,9 +84,8 @@ RTC_CONFIGURATION = RTCConfiguration({
 })
 
 # --- Inicjalizacja stanu sesji ---
-# KLUCZOWE: Inicjalizacja kolejki na samym początku
 if "result_queue" not in st.session_state:
-    st.session_state.result_queue = queue.Queue(maxsize=10) # Zwiększona trochę maxsize na wszelki wypadek
+    st.session_state.result_queue = queue.Queue(maxsize=10)
 
 if "zeskanowane" not in st.session_state:
     st.session_state.zeskanowane = {}
@@ -105,7 +104,6 @@ with st.sidebar:
     if st.button("🗑️ Wyczyść wszystkie skany", key="clear_scans_sidebar"):
         st.session_state.zeskanowane = {}
         st.session_state.last_scan_message = {"text": "", "type": "info"}
-        # Wyczyść kolejkę, jeśli jest używana
         if "result_queue" in st.session_state:
             while not st.session_state.result_queue.empty():
                 try:
@@ -174,12 +172,12 @@ if uploaded_file:
     if st.session_state.scanner_active:
         st.info("Skaner jest aktywny. Umieść kod QR w polu widzenia kamery. Zielona ramka oznacza wykrycie.")
         
-        def processor_factory():
-            return QRScannerProcessor(result_queue=st.session_state.result_queue)
+        def processor_factory_with_queue(queue_instance: queue.Queue):
+            return QRScannerProcessor(result_queue=queue_instance)
 
         webrtc_ctx = webrtc_streamer(
             key="qr-live-scanner",
-            video_processor_factory=processor_factory,
+            video_processor_factory=lambda: processor_factory_with_queue(st.session_state.result_queue), # ZMIENIONO
             rtc_configuration=RTC_CONFIGURATION,
             media_stream_constraints={"video": {"width": 640, "height": 480, "frameRate": {"ideal": 10, "max": 15}}, "audio": False},
             async_processing=True,
@@ -196,8 +194,6 @@ if uploaded_file:
                     all_updated_models_message_parts = []
                     changed_data = False
                     for decoded_text in newly_scanned_codes:
-                        # Sprawdź, czy ten kod nie został właśnie dodany w tej samej paczce (jeśli kolejka się szybko zapełni)
-                        # To bardziej dla bezpieczeństwa, cooldown w procesorze powinien to łapać
                         old_count = st.session_state.zeskanowane.get(decoded_text, 0)
                         current_count = old_count + 1
                         st.session_state.zeskanowane[decoded_text] = current_count
@@ -212,7 +208,7 @@ if uploaded_file:
                         st.rerun()
             except queue.Empty:
                 pass
-            except Exception as e: # Logowanie innych błędów z pętli kolejki
+            except Exception as e:
                 st.error(f"Błąd przetwarzania kolejki: {e}")
 
 
@@ -224,18 +220,14 @@ if uploaded_file:
         df_display = pd.DataFrame(columns=['model', 'stan', 'zeskanowano', 'różnica']) 
 
         if not stany_magazynowe.empty:
-            # Utwórz kopię danych magazynowych do wyświetlenia
             df_display = stany_magazynowe.copy()
-            # Zainicjuj kolumnę 'zeskanowano' zerami dla wszystkich modeli z magazynu
             df_display["zeskanowano"] = 0 
             
-            # Zaktualizuj 'zeskanowano' dla modeli, które są w magazynie i zostały zeskanowane
             for model_magazyn, row_index in df_display.iterrows():
                 model_name = row_index['model']
                 if model_name in st.session_state.zeskanowane:
                     df_display.loc[row_index.name, 'zeskanowano'] = st.session_state.zeskanowane[model_name]
 
-            # Dodaj modele, które zostały zeskanowane, ale nie ma ich w pliku magazynowym
             modele_tylko_w_skanach = []
             for skan_model, skan_ilosc in st.session_state.zeskanowane.items():
                 if skan_model not in df_display['model'].values:
@@ -248,15 +240,14 @@ if uploaded_file:
             df_display["zeskanowano"] = df_display["zeskanowano"].fillna(0).astype(int)
             df_display["stan"] = df_display["stan"].fillna(0).astype(int)
 
-        elif st.session_state.zeskanowane: # Tylko skany, brak pliku magazynowego
+        elif st.session_state.zeskanowane:
             df_display = pd.DataFrame(list(st.session_state.zeskanowane.items()), columns=["model", "zeskanowano"])
             df_display["stan"] = 0
         
         if not df_display.empty:
             df_display["model"] = df_display["model"].astype(str).str.strip()
-            df_display = df_display[~df_display["model"].str.lower().isin(["nan", "", "0"])] # Usunięcie niepoprawnych modeli
+            df_display = df_display[~df_display["model"].str.lower().isin(["nan", "", "0"])]
             
-            # Upewnij się, że kolumny istnieją przed obliczeniem różnicy
             if "stan" not in df_display.columns: df_display["stan"] = 0
             if "zeskanowano" not in df_display.columns: df_display["zeskanowano"] = 0
 
@@ -282,11 +273,10 @@ if uploaded_file:
                 file_name="raport_inwentaryzacja.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        elif st.session_state.zeskanowane: # Są skany, ale brak pliku lub plik pusty
+        elif st.session_state.zeskanowane:
              st.info("Wgraj plik Excel ze stanem magazynowym, aby zobaczyć pełne porównanie.")
-else: # if not uploaded_file
+else:
     st.info("👋 Witaj! Aby rozpocząć, wgraj plik Excel ze stanem magazynowym z panelu po lewej stronie.")
     st.markdown("Plik powinien zawierać kolumny `model` oraz `stan`.")
-    # Można dodać komunikat, że skaner QR nie jest dostępny bez załadowanego pliku
-    if st.session_state.get("scanner_active", False): # Użyj .get() dla bezpieczeństwa
+    if st.session_state.get("scanner_active", False):
         st.warning("Skaner QR jest aktywny, ale plik Excel nie został jeszcze wgrany. Dane nie będą porównywane ze stanem magazynowym.")
