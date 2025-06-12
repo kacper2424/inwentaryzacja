@@ -53,7 +53,7 @@ with st.sidebar:
     header_row_input = st.number_input(
         "Wiersz z nagłówkami (np. 18)", 
         min_value=1, 
-        value=1,
+        value=18,
         step=1,
         help="Wpisz numer wiersza, w którym znajdują się nagłówki kolumn ('model', 'stan')."
     )
