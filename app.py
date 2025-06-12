@@ -2,10 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 from PIL import Image
-# import cv2 # OpenCV nie jest już bezpośrednio potrzebne do dekodowania
-# import numpy as np 
 from collections import Counter 
-
 from pyzbar.pyzbar import decode as pyzbar_decode
 
 # === Funkcja kolorująca różnicę tylko w kolumnie 'różnica' ===
@@ -63,13 +60,12 @@ with st.sidebar:
 # --- Inicjalizacja stanu sesji ---
 if "zeskanowane" not in st.session_state:
     st.session_state.zeskanowane = {}
-if "input_model_manual" not in st.session_state:
-    st.session_state.input_model_manual = ""
+# Usunięto niepotrzebną linię: if "input_model_manual" not in st.session_state
 if "last_scan_message_photo_all" not in st.session_state:
     st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
 if "show_camera_photo_all" not in st.session_state:
     st.session_state.show_camera_photo_all = False
-if "last_processed_photo_id" not in st.session_state: # NOWA ZMIENNA STANU
+if "last_processed_photo_id" not in st.session_state:
     st.session_state.last_processed_photo_id = None
 
 # --- Główna zawartość ---
@@ -80,36 +76,42 @@ if uploaded_file:
         st.error(f"Błąd wczytywania pliku: {e}")
         st.stop()
 
+    # --- POCZĄTEK POPRAWIONEGO BLOKU ---
     st.subheader("➕ Dodaj model ręcznie")
+
     def process_manually_entered_model():
-        model = st.session_state.input_model_manual.strip()
+        # Używamy klucza zdefiniowanego w st.text_input poniżej
+        model = st.session_state.input_model_manual_photo_all.strip()
         if model:
             count = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.zeskanowane[model] = count
-            st.session_state.input_model_manual = "" 
+            # Czyścimy pole inputu poprzez wyzerowanie jego wartości w session_state
+            st.session_state.input_model_manual_photo_all = "" 
             st.session_state.last_scan_message_photo_all = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
+    
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
+        # Ten klucz musi być taki sam jak ten używany w funkcji powyżej
         key="input_model_manual_photo_all",
         on_change=process_manually_entered_model, 
         placeholder="Np. Laptop XYZ123"
     )
     st.markdown("---")
+    # --- KONIEC POPRAWIONEGO BLOKU ---
 
     st.subheader("📸 Skaner QR (Zrób Zdjęcie - wszystkie kody)")
     
     camera_button_label = "📷 Uruchom Kamerę" if not st.session_state.show_camera_photo_all else "📸 Ukryj Kamerę"
     if st.button(camera_button_label, key="toggle_camera_button_photo_all"):
         st.session_state.show_camera_photo_all = not st.session_state.show_camera_photo_all
-        if not st.session_state.show_camera_photo_all: # Jeśli ukrywamy kamerę
-            st.session_state.last_processed_photo_id = None # Resetuj ID, gdy kamera jest wyłączana
+        if not st.session_state.show_camera_photo_all:
+            st.session_state.last_processed_photo_id = None
             st.session_state.last_scan_message_photo_all = {"text": "Kamera wyłączona.", "type": "info"}
-        else: # Jeśli włączamy kamerę
+        else:
             st.session_state.last_scan_message_photo_all = {"text": "Kamera włączona. Gotowa do zrobienia zdjęcia.", "type": "info"}
         st.rerun()
 
     message_placeholder_photo_all = st.empty()
-    # Wyświetlaj komunikat zawsze, jeśli istnieje, niezależnie od przetwarzania zdjęcia w tym przebiegu
     if st.session_state.last_scan_message_photo_all["text"]:
         msg = st.session_state.last_scan_message_photo_all
         if msg["type"] == "success": message_placeholder_photo_all.success(msg["text"], icon="🎉")
@@ -126,11 +128,9 @@ if uploaded_file:
         )
 
         if img_file_buffer is not None:
-            current_photo_id = img_file_buffer.file_id # Pobierz ID pliku ze zdjęcia
+            current_photo_id = img_file_buffer.file_id
 
-            # Przetwarzaj tylko jeśli ID zdjęcia jest nowe LUB jeśli nie mamy zapisanego ID (pierwsze zdjęcie po uruchomieniu/wyczyszczeniu)
             if current_photo_id != st.session_state.last_processed_photo_id:
-                # st.write(f"DEBUG: Przetwarzanie nowego zdjęcia ID: {current_photo_id}") # Do debugowania
                 bytes_data = img_file_buffer.getvalue()
                 with st.spinner("🔍 Przetwarzanie zdjęcia..."):
                     decoded_qr_texts_list = decode_all_qrs_from_image_pyzbar(io.BytesIO(bytes_data))
@@ -154,14 +154,9 @@ if uploaded_file:
                         "type": "warning"
                     }
                 
-                st.session_state.last_processed_photo_id = current_photo_id # Zapisz ID przetworzonego zdjęcia
-                st.rerun() # Odśwież UI
-            # else: # To samo zdjęcie co poprzednio, nie przetwarzaj ponownie, ale komunikat już jest wyświetlany
-            #    st.write(f"DEBUG: To samo zdjęcie ID: {current_photo_id}, nie przetwarzam ponownie.") # Do debugowania
-            #    pass
+                st.session_state.last_processed_photo_id = current_photo_id
+                st.rerun()
 
-
-    # Wyświetlanie tabeli porównawczej (logika bez zmian)
     magazyn_df_exists_and_loaded = 'stany_magazynowe' in locals() and stany_magazynowe is not None
     if st.session_state.zeskanowane or (uploaded_file and magazyn_df_exists_and_loaded):
         st.markdown("---")
