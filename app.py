@@ -16,12 +16,13 @@ def highlight_diff(val):
 
 # === Wczytaj dane z Excela ===
 @st.cache_data
-def load_data(file):
-    df = pd.read_excel(file)
+def load_data(file, header_row): # <-- ZMIANA 1: Dodany argument
+    # Pandas liczy wiersze od 0, więc odejmujemy 1
+    df = pd.read_excel(file, header=header_row - 1)
     df.columns = [col.lower().strip() for col in df.columns]
     required_cols = {'model', 'stan'}
     if not required_cols.issubset(df.columns):
-        raise ValueError("Plik Excel musi zawierać kolumny: 'model' oraz 'stan'.")
+        raise ValueError("Plik Excel musi zawierać kolumny: 'model' oraz 'stan'. Sprawdź, czy podano poprawny wiersz nagłówkowy.")
     df = df[['model', 'stan']]
     df['model'] = df['model'].astype(str).str.strip()
     df['stan'] = pd.to_numeric(df['stan'], errors='coerce').fillna(0).astype(int)
@@ -47,11 +48,21 @@ st.title("📦 Inwentaryzacja sprzętu (Skanowanie ze Zdjęcia)")
 # --- Kolumna boczna ---
 with st.sidebar:
     st.header("⚙️ Ustawienia")
+
+    # --- ZMIANA 2: Dodane pole do wyboru wiersza nagłówkowego ---
+    header_row_input = st.number_input(
+        "Wiersz z nagłówkami (np. 18)", 
+        min_value=1, 
+        value=1,
+        step=1,
+        help="Wpisz numer wiersza, w którym znajdują się nagłówki kolumn ('model', 'stan')."
+    )
+
     uploaded_file = st.file_uploader("Wgraj plik Excel ze stanem magazynowym", type=["xlsx"])
     if st.button("🗑️ Wyczyść wszystkie skany", key="clear_scans_photo_all"):
         st.session_state.zeskanowane = {}
         st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
-        st.session_state.last_processed_photo_id = None # Resetuj ID ostatniego zdjęcia
+        st.session_state.last_processed_photo_id = None
         if "show_camera_photo_all" in st.session_state:
             st.session_state.show_camera_photo_all = False
         st.success("Wszystkie zeskanowane pozycje zostały wyczyszczone.")
@@ -60,7 +71,6 @@ with st.sidebar:
 # --- Inicjalizacja stanu sesji ---
 if "zeskanowane" not in st.session_state:
     st.session_state.zeskanowane = {}
-# Usunięto niepotrzebną linię: if "input_model_manual" not in st.session_state
 if "last_scan_message_photo_all" not in st.session_state:
     st.session_state.last_scan_message_photo_all = {"text": "", "type": "info"}
 if "show_camera_photo_all" not in st.session_state:
@@ -71,33 +81,29 @@ if "last_processed_photo_id" not in st.session_state:
 # --- Główna zawartość ---
 if uploaded_file:
     try:
-        stany_magazynowe = load_data(uploaded_file)
+        # --- ZMIANA 3: Przekazanie wartości do funkcji ---
+        stany_magazynowe = load_data(uploaded_file, header_row=header_row_input)
     except Exception as e:
         st.error(f"Błąd wczytywania pliku: {e}")
         st.stop()
 
-    # --- POCZĄTEK POPRAWIONEGO BLOKU ---
     st.subheader("➕ Dodaj model ręcznie")
 
     def process_manually_entered_model():
-        # Używamy klucza zdefiniowanego w st.text_input poniżej
         model = st.session_state.input_model_manual_photo_all.strip()
         if model:
             count = st.session_state.zeskanowane.get(model, 0) + 1
             st.session_state.zeskanowane[model] = count
-            # Czyścimy pole inputu poprzez wyzerowanie jego wartości w session_state
             st.session_state.input_model_manual_photo_all = "" 
             st.session_state.last_scan_message_photo_all = {"text": f"👍 Dodano ręcznie: **{model}** (Nowa ilość: {count})", "type": "success"}
     
     st.text_input(
         "Wpisz model ręcznie i naciśnij Enter:", 
-        # Ten klucz musi być taki sam jak ten używany w funkcji powyżej
         key="input_model_manual_photo_all",
         on_change=process_manually_entered_model, 
         placeholder="Np. Laptop XYZ123"
     )
     st.markdown("---")
-    # --- KONIEC POPRAWIONEGO BLOKU ---
 
     st.subheader("📸 Skaner QR (Zrób Zdjęcie - wszystkie kody)")
     
